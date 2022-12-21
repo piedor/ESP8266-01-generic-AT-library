@@ -19,9 +19,9 @@ class ESP8266_01 {
   	String _message;
   	
   	bool checkAck(String ack, int timeout = RESPONSE_TIMEOUT);
-  	int getResponseServerDataLength();
-  	String getResponseServer();
-  	bool sendRequestServer(String host, String request);
+  	int getResponseServerDataLength(int id);
+  	String getResponseServer(int id, bool keepAlive);
+  	bool sendRequestServer(int id, String host, String request);
     void cleanMessage(int startIndex, int stopIndex);
     
   public:
@@ -44,12 +44,14 @@ class ESP8266_01 {
     String isConnected();
     bool connectWifi(String ssid, String password);
     void setSingleConnection();
+    void setMultipleConnection();
     int getStatus();
     void enableStoringResponseServerData();
     void enableAutoRedirectUrl();
     void disableAutoRedirectUrl();
-    String getServerConnectedIp();
+    String getServerConnectedIp(int id);
     String getDomainNameIp(String host);
+    int getHostId(String host);
     String getSecureConnection(String host, String request, int port = 80, bool waitResponse = true, bool keepAlive = false);
     void printToDebug(String text);
 };

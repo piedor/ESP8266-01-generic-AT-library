@@ -33,6 +33,7 @@ bool ESP8266_01::checkAck(String ack, int timeout){
 	while(currentMillis - startMillis < timeout && _message.lastIndexOf(ack) < 0 && _message.lastIndexOf(NACK_OUT) < 0){
 		if(serial->available()){
 			_message += serial->readString();
+			//printToDebug(_message);
 		}
 		currentMillis = millis();
 	}
@@ -129,7 +130,20 @@ bool ESP8266_01::connectWifi(String ssid, String password){
 	return false;
 }
 void ESP8266_01::setSingleConnection(){
-	sendCommand("AT+CIPMUX=0", ACK_OUT);
+	if(sendCommand("AT+CIPMUX=0", ACK_OUT)){
+		printToDebug("Single connection set OK");
+	}
+	else{
+		printToDebug("Single connection set FAIL");
+	}
+}
+void ESP8266_01::setMultipleConnection(){
+	if(sendCommand("AT+CIPMUX=1", ACK_OUT)){
+		printToDebug("Multiple connection set OK");
+	}
+	else{
+		printToDebug("Multiple connection set FAIL");
+	}
 }
 int ESP8266_01::getStatus(){
 	sendCommand("AT+CIPSTATUS", ACK_OUT);
@@ -139,10 +153,24 @@ int ESP8266_01::getStatus(){
 void ESP8266_01::enableStoringResponseServerData(){
 	sendCommand("AT+CIPRECVMODE=1", ACK_OUT);
 }
-int ESP8266_01::getResponseServerDataLength(){
+int ESP8266_01::getResponseServerDataLength(int id){
 	sendCommand("AT+CIPRECVLEN?", ACK_OUT);
 	cleanMessage(_message.indexOf("\n+CIPRECVLEN:") + 13, _message.lastIndexOf("\r"));
-	return(_message.toInt());
+	String lengths[5];
+	int StringCount = 0;
+    while(_message.length() > 0){
+      int index = _message.indexOf(',');
+      if (index == -1) // No ; found
+      {
+        lengths[StringCount++] = _message;
+        break;
+      }
+      else{
+        lengths[StringCount++] = _message.substring(0, index);
+        _message = _message.substring(index+1);
+      }
+    }
+	return(lengths[id].toInt());
 }
 void ESP8266_01::enableAutoRedirectUrl(){
 	redirectUrlOn = true;
@@ -150,9 +178,9 @@ void ESP8266_01::enableAutoRedirectUrl(){
 void ESP8266_01::disableAutoRedirectUrl(){
 	redirectUrlOn = false;
 }
-String ESP8266_01::getResponseServer(){
+String ESP8266_01::getResponseServer(int id, bool keepAlive){
 	String site;
-	sendCommand("AT+CIPRECVDATA=5000", ACK_OUT);
+	sendCommand("AT+CIPRECVDATA=" + String(id) + ",5000", ACK_OUT);
 	if(redirectUrlOn){
 		// HTTP 302 redirect url
 		int redirectUrlIndex = _message.indexOf("Location:");
@@ -161,11 +189,15 @@ String ESP8266_01::getResponseServer(){
 			cleanMessage(10, _message.indexOf("\r"));
 			site = _message;
 			printToDebug("HTTP 302 redirect to link: " + site);
-			sendCommand("AT+CIPCLOSE", ACK_OUT);
-			getSecureConnection(site.substring(8,36), site.substring(36,site.length()), 443);
+			if(!keepAlive){
+				sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+			}
+			getSecureConnection(site.substring(8,36), site.substring(36,site.length()), 443, true, keepAlive);
 			// get redirect response
 			String response = _message;
-			sendCommand("AT+CIPCLOSE", ACK_OUT);
+			if(!keepAlive){
+				sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+			}
 			_message = response;
 		}
 	}
@@ -173,9 +205,9 @@ String ESP8266_01::getResponseServer(){
 	return(_message);
 	//printToDebug(_message);
 }
-bool ESP8266_01::sendRequestServer(String host, String request){
+bool ESP8266_01::sendRequestServer(int id, String host, String request){
 	String s = "GET " + request + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: ESP8266\r\n\r\n";
-	sendCommand("AT+CIPSEND=" + String(s.length()), ACK_OUT_CIPSEND);
+	sendCommand("AT+CIPSEND=" + String(id) + "," + String(s.length()), ACK_OUT_CIPSEND);
 	for(int i=0;i<s.length();i+=100){
 		// Divide message for better UART communication ( default ESP8266 max RX buffer = 128 bytes)
 		serial->print(s.substring(i, i+100));
@@ -187,12 +219,13 @@ bool ESP8266_01::sendRequestServer(String host, String request){
 	printToDebug("Request to host send FAIL");
 	return(false);
 }
-String ESP8266_01::getServerConnectedIp(){
+String ESP8266_01::getServerConnectedIp(int id){
 	// Get IP of connected host
 	sendCommand("AT+CIPSTATUS", ACK_OUT);
 	int status = _message.substring(_message.indexOf("\nSTATUS:") + 8, _message.lastIndexOf("\r")).toInt();
 	if(status == 3){ // 3 = connected to server
-		cleanMessage(_message.indexOf("+CIPSTATUS:0") + 20, _message.lastIndexOf("\r"));
+		cleanMessage(_message.indexOf("+CIPSTATUS:" + String(id)) + 20, _message.length());
+		cleanMessage(0, _message.indexOf("\r"));
 		cleanMessage(0, _message.lastIndexOf("\""));
 		return(_message);
 	}
@@ -206,12 +239,25 @@ String ESP8266_01::getDomainNameIp(String host){
 	}
 	return("NULL");
 }
+int ESP8266_01::getHostId(String host){
+	String ip = getDomainNameIp(host);
+	sendCommand("AT+CIPSTATUS", ACK_OUT);
+	int status = _message.substring(_message.indexOf("\nSTATUS:") + 8, _message.lastIndexOf("\r")).toInt();
+	if(status == 3){ // 3 = connected to server
+		cleanMessage(0, _message.indexOf(ip));
+		int i = _message.lastIndexOf(":");
+		cleanMessage(i+1, i+2);
+		return(_message.toInt());
+	}
+	return(-1);
+}
 String ESP8266_01::getSecureConnection(String host, String request, int port, bool waitResponse, bool keepAlive){
 	// Start a SSL request to host and return response if waitResponse
 	// If keepAlive don't close connection to host (HTTP1.1 doesn't need header: "Connection: keep-alive")
-	String actualIpConnected = getServerConnectedIp();
-	if(!actualIpConnected.equals(getDomainNameIp(host))){
-		if(sendCommand("AT+CIPSTART=\"SSL\",\"" + host + "\"," + port, ACK_OUT, true, 20000)){
+	int id = getHostId(host);
+	if(id < 0){
+		if(sendCommand("AT+CIPSTARTEX=\"SSL\",\"" + host + "\"," + port, ACK_OUT, true, 20000)){
+			id = getHostId(host);
 			printToDebug("Host: " + host + " connect OK");
 		}
 		else{
@@ -219,11 +265,11 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 			return(NACK_OUT);
 		}
 	}
-	if(sendRequestServer(host, request)){
+	if(sendRequestServer(id, host, request)){
 		if(waitResponse){
 			unsigned long currentMillis = millis();
 			unsigned long startMillis = millis();
-			while(getResponseServerDataLength() <= 0 && currentMillis - startMillis < RESPONSE_TIMEOUT){
+			while(getResponseServerDataLength(id) <= 0 && currentMillis - startMillis < RESPONSE_TIMEOUT){
 				currentMillis = millis();
 				delay(10);
 			}
@@ -232,7 +278,7 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 				return(NACK_OUT);
 			}
 			else{
-				return(getResponseServer());
+				return(getResponseServer(id, keepAlive));
 			}
 		}
 	}
@@ -240,7 +286,7 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 		return(NACK_OUT);
 	}
 	if(!keepAlive){
-		sendCommand("AT+CIPCLOSE", ACK_OUT);
+		sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
 	}
 	return(ACK_OUT);
 	//cleanMessage(11, _message.length()); // 8 size of command

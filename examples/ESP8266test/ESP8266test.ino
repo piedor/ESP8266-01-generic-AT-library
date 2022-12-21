@@ -13,6 +13,8 @@ void setup() {
   esp = ESP8266_01(Serial1, Serial, true);
   // Set as client only
   esp.setAsStation();
+  esp.setSingleConnection();
+  // esp.setMultipleConnection(); // Usefull for fast interaction with multiple site
   // Connect to wifi loop
   while(esp.isConnected().equals("")){
     esp.connectWifi(SSID, PASSWORD);
