@@ -244,10 +244,16 @@ int ESP8266_01::getHostId(String host){
 	sendCommand("AT+CIPSTATUS", ACK_OUT);
 	int status = _message.substring(_message.indexOf("\nSTATUS:") + 8, _message.lastIndexOf("\r")).toInt();
 	if(status == 3){ // 3 = connected to server
-		cleanMessage(0, _message.indexOf(ip));
-		int i = _message.lastIndexOf(":");
-		cleanMessage(i+1, i+2);
-		return(_message.toInt());
+		int j = _message.indexOf(ip);
+		if(j >= 0){
+			cleanMessage(0, j);
+			int i = _message.lastIndexOf(":");
+			cleanMessage(i+1, i+2);
+			return(_message.toInt());	
+		}
+		else{
+			return(-1);
+		}
 	}
 	return(-1);
 }
