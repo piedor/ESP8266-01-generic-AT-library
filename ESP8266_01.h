@@ -1,3 +1,9 @@
+/*
+	ESP8266_01.h	HEADER file
+	Tested with ESP8266-01 AT firmware >= v2.2.0.0
+	ESP8266 AT user guide can be found here: https://docs.espressif.com/projects/esp-at/en/release-v2.2.0.0_esp8266/
+*/
+
 #ifndef __ESP8266_01_H__
 #define __ESP8266_01_H__
 
@@ -22,6 +28,8 @@ class ESP8266_01 {
   	int getResponseServerDataLength(int id);
   	String getResponseServer(int id, bool keepAlive);
   	bool sendRequestServer(int id, String host, String request);
+  	String getServerConnectedIp(int id);
+  	int getHostId(String host);
     void cleanMessage(int startIndex, int stopIndex);
     
   public:
@@ -34,8 +42,8 @@ class ESP8266_01 {
   	ESP8266_01(Stream &serial, Stream &debug, bool debugOn = false);
 	~ESP8266_01();
 	ESP8266_01& operator=(const ESP8266_01 &esp);
-	bool sendCommand(String command, String ack, bool waitAck = true, int timeout = RESPONSE_TIMEOUT);
-    void init();
+	bool sendCommand(String command, String ack = ACK_OUT, bool waitAck = true, int timeout = RESPONSE_TIMEOUT);
+    bool init();
     void reset();
     void setAsStation();
     void setAsAp();
@@ -49,9 +57,7 @@ class ESP8266_01 {
     void enableStoringResponseServerData();
     void enableAutoRedirectUrl();
     void disableAutoRedirectUrl();
-    String getServerConnectedIp(int id);
     String getDomainNameIp(String host);
-    int getHostId(String host);
     String getSecureConnection(String host, String request, int port = 80, bool waitResponse = true, bool keepAlive = false);
     void printToDebug(String text);
 };
