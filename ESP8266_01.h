@@ -1,7 +1,7 @@
 /*
 	ESP8266_01.h	HEADER file
 	Tested with ESP8266-01 AT firmware >= v2.2.0.0
-	ESP8266 AT user guide can be found here: https://docs.espressif.com/projects/esp-at/en/release-v2.2.0.0_esp8266/
+	ESP8266 AT user guide can be found here: https://docs.espressif.com/projects/esp-at/en/release-v2.2.0.0_esp8266/ or in docs folder
 */
 
 #ifndef __ESP8266_01_H__
@@ -23,10 +23,11 @@
 class ESP8266_01 {
   private:
   	String _message;
+  	bool _multipleConnection;
   	
   	bool checkAck(String ack, int timeout = RESPONSE_TIMEOUT);
   	int getResponseServerDataLength(int id);
-  	String getResponseServer(int id, bool keepAlive);
+  	String getResponseServer(int id, bool keepAlive, int responseLength);
   	bool sendRequestServer(int id, String host, String request);
   	String getServerConnectedIp(int id);
   	int getHostId(String host);

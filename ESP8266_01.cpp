@@ -1,7 +1,7 @@
 /*
 	ESP8266_01.cpp
 	Tested with ESP8266-01 AT firmware >= v2.2.0.0
-	ESP8266 AT user guide can be found here: https://docs.espressif.com/projects/esp-at/en/release-v2.2.0.0_esp8266/
+	ESP8266 AT user guide can be found here: https://docs.espressif.com/projects/esp-at/en/release-v2.2.0.0_esp8266/ or in docs folder
 */
 
 #include "Arduino.h"
@@ -26,6 +26,7 @@ ESP8266_01::ESP8266_01(Stream &serial, Stream &debug, bool debugOn):
 	else{
 		printToDebug("ESP8266 init ERROR");
 	}
+	_multipleConnection = false;
 	enableStoringResponseServerData();
 }
 
@@ -178,6 +179,7 @@ void ESP8266_01::setSingleConnection(){
 	// Set module accept only 1 connection to a server at a time 
 	if(sendCommand("AT+CIPMUX=0", ACK_OUT)){
 		printToDebug("Single connection set OK");
+		_multipleConnection = false;
 	}
 	else{
 		printToDebug("Single connection set FAIL");
@@ -190,6 +192,7 @@ void ESP8266_01::setMultipleConnection(){
 	// Every connection is saved with an id [0,4] -> max 5 contemporary connections
 	if(sendCommand("AT+CIPMUX=1", ACK_OUT)){
 		printToDebug("Multiple connection set OK");
+		_multipleConnection = true;
 	}
 	else{
 		printToDebug("Multiple connection set FAIL");
@@ -249,12 +252,19 @@ void ESP8266_01::disableAutoRedirectUrl(){
 	// DEFAULT Ignore HTTP 302 redirect url in server response
 	redirectUrlOn = false;
 }
-String ESP8266_01::getResponseServer(int id, bool keepAlive){
+String ESP8266_01::getResponseServer(int id, bool keepAlive, int responseLength){
 	// PRIVATE
 	// Get response stored after request to server
 	// Connected server saved with id
 	String site;
-	sendCommand("AT+CIPRECVDATA=" + String(id) + ",5000", ACK_OUT);
+	// if single connection -> AT+CIPRECVDATA=length
+	// if multiple connection -> AT+CIPRECVLEN=id,length
+	if(_multipleConnection){
+		sendCommand("AT+CIPRECVDATA=" + String(id) + "," + String(responseLength), ACK_OUT);
+	}
+	else{
+		sendCommand("AT+CIPRECVDATA=" + String(responseLength), ACK_OUT);
+	}
 	if(redirectUrlOn){
 		// HTTP 302 redirect url
 		// If keepAlive true don't close connection
@@ -265,13 +275,23 @@ String ESP8266_01::getResponseServer(int id, bool keepAlive){
 			site = _message;
 			printToDebug("HTTP 302 redirect to link: " + site);
 			if(!keepAlive){
-				sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+				if(_multipleConnection){
+					sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+				}
+				else{
+					sendCommand("AT+CIPCLOSE", ACK_OUT);
+				}
 			}
 			getSecureConnection(site.substring(8,36), site.substring(36,site.length()), 443, true, keepAlive);
 			// Get redirect response
 			String response = _message;
 			if(!keepAlive){
-				sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+				if(_multipleConnection){
+					sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+				}
+				else{
+					sendCommand("AT+CIPCLOSE", ACK_OUT);
+				}
 			}
 			_message = response;
 		}
@@ -288,7 +308,12 @@ bool ESP8266_01::sendRequestServer(int id, String host, String request){
 	//		Host: host
 	//		User-Agent: device
 	String s = "GET " + request + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: ESP8266\r\n\r\n";
-	sendCommand("AT+CIPSEND=" + String(id) + "," + String(s.length()), ACK_OUT_CIPSEND);
+	if(_multipleConnection){
+		sendCommand("AT+CIPSEND=" + String(id) + "," + String(s.length()), ACK_OUT_CIPSEND);	
+	}
+	else{
+		sendCommand("AT+CIPSEND=" + String(s.length()), ACK_OUT_CIPSEND);
+	}
 	for(int i=0;i<s.length();i+=100){
 		// Divide message for better UART communication ( default ESP8266 max RX buffer = 128 bytes)
 		serial->print(s.substring(i, i+100));
@@ -348,6 +373,11 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 	// If keepAlive don't close connection to host (HTTP1.1 doesn't need header: "Connection: keep-alive")
 	int id = getHostId(host);
 	if(id < 0){
+		if(!_multipleConnection && getStatus()== 3){
+			// if single connection and is connected to different site then close connection
+			sendCommand("AT+CIPCLOSE", ACK_OUT);
+		}
+		
 		if(sendCommand("AT+CIPSTARTEX=\"SSL\",\"" + host + "\"," + port, ACK_OUT, true, 20000)){
 			id = getHostId(host);
 			printToDebug("Host: " + host + " connect OK");
@@ -361,16 +391,18 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 		if(waitResponse){
 			unsigned long currentMillis = millis();
 			unsigned long startMillis = millis();
-			while(getResponseServerDataLength(id) <= 0 && currentMillis - startMillis < RESPONSE_TIMEOUT){
-				currentMillis = millis();
+			int responseLength = getResponseServerDataLength(id);
+			while(responseLength <= 0 && currentMillis - startMillis < RESPONSE_TIMEOUT){
 				delay(10);
+				responseLength = getResponseServerDataLength(id);
+				currentMillis = millis();
 			}
 			if(currentMillis - startMillis >= RESPONSE_TIMEOUT){
 				printToDebug("Server response TIMEOUT");
 				return(NACK_OUT);
 			}
 			else{
-				return(getResponseServer(id, keepAlive));
+				return(getResponseServer(id, keepAlive, responseLength));
 			}
 		}
 	}
@@ -378,7 +410,12 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 		return(NACK_OUT);
 	}
 	if(!keepAlive){
-		sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+		if(_multipleConnection){
+			sendCommand("AT+CIPCLOSE=" + String(id), ACK_OUT);
+		}
+		else{
+			sendCommand("AT+CIPCLOSE", ACK_OUT);
+		}
 	}
 	return(ACK_OUT);
 	//cleanMessage(11, _message.length()); // 8 size of command
