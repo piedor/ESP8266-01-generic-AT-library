@@ -52,6 +52,7 @@ class ESP8266_01 {
     void scanWifi();
     String isConnected();
     bool connectWifi(String ssid, String password);
+    bool setAutoReconnectWifi(int intervalSeconds, int attempts);
     void setSingleConnection();
     void setMultipleConnection();
     int getStatus();
@@ -62,5 +63,7 @@ class ESP8266_01 {
     String getSecureConnection(String host, String request, int port = 80, bool waitResponse = true, bool keepAlive = false);
     void printToDebug(String text);
 };
+
+bool findSubstring(String message, String substring);
 
 #endif

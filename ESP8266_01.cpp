@@ -5,9 +5,25 @@
 */
 
 #include "Arduino.h"
-#include "Stream.h"
-#include "String.h"
 #include "ESP8266_01.h"
+
+bool findSubstring(String message, String substring){
+	// Return if message contains substring
+	int lastIndex = substring.length() - 1;
+	int index = lastIndex;
+	for(int i = message.length() - 1; i >= 0; i--){
+		if(message.charAt(i) == substring.charAt(index)){
+			index--;
+			if(index == -1){
+				return true;
+			}
+		}
+		else{
+			index = lastIndex;
+		}
+	}
+	return false;
+}
 
 
 ESP8266_01::ESP8266_01(){
@@ -26,8 +42,10 @@ ESP8266_01::ESP8266_01(Stream &serial, Stream &debug, bool debugOn):
 	else{
 		printToDebug("ESP8266 init ERROR");
 	}
-	_multipleConnection = false;
+	reset();
+	delay(1000);
 	enableStoringResponseServerData();
+	_multipleConnection = false;
 }
 
 ESP8266_01::~ESP8266_01(){
@@ -49,13 +67,16 @@ bool ESP8266_01::checkAck(String ack, int timeout){
 	_message = "";
 	unsigned long currentMillis = millis();
 	unsigned long startMillis = millis();
+	char c;
 	// !_message.substring(_message.length()-(sizeof(ACK_OUT)+1),_message.length()-2).equals(ACK_OUT)
-	while(currentMillis - startMillis < timeout && _message.lastIndexOf(ack) < 0 && _message.lastIndexOf(NACK_OUT) < 0){
+	while(currentMillis - startMillis < timeout){
 		// Put in _message all ESP8266 send to the board
 		// If find ack or nack stop
-		if(serial->available()){
-			_message += serial->readString();
-			//printToDebug(_message);
+		while(serial->available()){
+			_message += (char)serial->read();
+		}
+		if(findSubstring(_message, ack) || findSubstring(_message, NACK_OUT)){
+			break;
 		}
 		currentMillis = millis();
 	}
@@ -97,12 +118,12 @@ bool ESP8266_01::init(){
 }
 void ESP8266_01::reset(){
 	// PUBLIC
-	// Restart module
+	// Reset module
 	if(sendCommand("AT+RST", ACK_OUT)){
-		printToDebug("Restart OK");
+		printToDebug("Reset OK");
 	}
 	else{
-		printToDebug("Restart ERROR");
+		printToDebug("Reset ERROR");
 	}
 }
 void ESP8266_01::setAsStation(){
@@ -170,6 +191,19 @@ bool ESP8266_01::connectWifi(String ssid, String password){
 	}
 	else{
 		printToDebug(ssid + " connect ERROR");
+	}
+	return false;
+}
+
+bool ESP8266_01::setAutoReconnectWifi(int intervalSeconds, int attempts){
+	// PUBLIC
+	// The ESP tries to reconnect to AP at the interval intervalSeconds for attempts times when disconnected
+	if(sendCommand("AT+CWRECONNCFG=" + String(intervalSeconds) + "," + String(attempts), ACK_OUT)){
+		printToDebug("AutoReconnect WiFI set OK");
+		return true;
+	}
+	else{
+		printToDebug("AutoReconnect WiFI set ERROR");
 	}
 	return false;
 }
@@ -260,10 +294,10 @@ String ESP8266_01::getResponseServer(int id, bool keepAlive, int responseLength)
 	// if single connection -> AT+CIPRECVDATA=length
 	// if multiple connection -> AT+CIPRECVLEN=id,length
 	if(_multipleConnection){
-		sendCommand("AT+CIPRECVDATA=" + String(id) + "," + String(responseLength), ACK_OUT);
+		sendCommand("AT+CIPRECVDATA=" + String(id) + "," + String(responseLength), "0\r\n");
 	}
 	else{
-		sendCommand("AT+CIPRECVDATA=" + String(responseLength), ACK_OUT);
+		sendCommand("AT+CIPRECVDATA=" + String(responseLength), "0\r\n");
 	}
 	if(redirectUrlOn){
 		// HTTP 302 redirect url
@@ -387,13 +421,18 @@ String ESP8266_01::getSecureConnection(String host, String request, int port, bo
 			return(NACK_OUT);
 		}
 	}
+	int responseLength = getResponseServerDataLength(id);
+	if(responseLength > 0){
+		// Flush socket
+		getResponseServer(id, keepAlive, responseLength);
+	}
 	if(sendRequestServer(id, host, request)){
 		if(waitResponse){
 			unsigned long currentMillis = millis();
 			unsigned long startMillis = millis();
-			int responseLength = getResponseServerDataLength(id);
+			responseLength = getResponseServerDataLength(id);
 			while(responseLength <= 0 && currentMillis - startMillis < RESPONSE_TIMEOUT){
-				delay(10);
+				delay(100);
 				responseLength = getResponseServerDataLength(id);
 				currentMillis = millis();
 			}
