@@ -6,3 +6,6 @@ Pilot module ESP8266-01 with AT firmware
 
 - ESP8266-01 AT firmware > 2.2.0
 - Board Arduino like
+
+## Note 
+Only station mode
